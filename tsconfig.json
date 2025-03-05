@@ -20,7 +20,9 @@
     "inlineSources": true,
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
-    "outDir": "build"
+    "outDir": "build",
+    "resolveJsonModule": true,
   },
-  "exclude": ["node_modules", "build", "**/*.spec.ts"]
+  "exclude": ["node_modules", "build", "**/*.spec.ts"],
+  "include": ["src", "bot/locales/*.json"]
 }

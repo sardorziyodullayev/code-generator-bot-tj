@@ -7,7 +7,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon --ignore '*.json' --exec ts-node -- --files src/index.ts",
     "start": "node build/index.js",
-    "build": "rm -rf ./build && tsc --project ./tsconfig.json && cp -ivr $PWD/src/bot/locales $PWD/build/bot/locales"
+    "build": "rm -rf ./build && tsc --project ./tsconfig.json && npm run copy-locales",
+    "copy-locales": "npx copyfiles src/bot/locales/*.json build/bot/locales"
   },
   "author": "Umar Akbarov",
   "license": "ISC",
@@ -42,6 +43,7 @@
     "@types/node-cron": "^3.0.8",
     "@typescript-eslint/eslint-plugin": "^5.13.0",
     "@typescript-eslint/parser": "^5.13.0",
+    "copyfiles": "^2.4.1",
     "dotenv": "^16.3.1",
     "ts-node": "^10.9.1",
     "typescript": "^5.2.2"
