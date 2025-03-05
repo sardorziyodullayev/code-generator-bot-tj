@@ -1,0 +1,32 @@
+{
+  "system": {
+    "title": "Bot"
+  },
+  "common": {
+    "back": "⬅️ Orqaga",
+    "codeNotFound": "Kod topilmadi",
+    "codeAllreadyUsed": "Kod allaqachon ishlatilgan",
+    "codeReal": "Kod haqiqiy"
+  },
+  "validation": {
+    "invalidPhoneNumber": "Раками мобилии худро ворид кунед"
+  },
+  "auth": {
+    "requestName": "Номи худро дохил кунед",
+    "requestChooseLang": "Забонро интихоб кунед\nВыберите язык",
+    "requestPhoneNumber": "Раками мобилии худро ворид кунед",
+    "sendContact": "Раками мобилии худро ворид кунед"
+  },
+  "inlineKeyboard": {
+    "aboutMenu": "Biz haqimizda",
+    "settingsMenu": "⚙️ Sozlamalar",
+    "changeLang": "Tilni o'zgaritirish"
+  },
+
+  "menu": {
+    "title": "HURMATLI MIJOZ\nSiz Valesco avtomobil moyi harid qilib, aksiya qatnashchisiga aylandingiz!\n\nKODNI KIRITING!",
+    "aboutContent": "Biz OOO \"...\" Groupmiz...",
+    "settingsContent": "⚙️ Sozlamalar",
+    "langListContent": "Tilni tanlang"
+  }
+}
