@@ -12,7 +12,7 @@ app.use(cors());
 
 app
   .use(express.json())
-  .use(express.urlencoded())
+  .use(express.urlencoded({extended: true}))
   .use(addMethodToResponse)
   .use(router)
   .use(globalErrorHandler);
