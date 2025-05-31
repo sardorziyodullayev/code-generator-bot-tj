@@ -29,9 +29,9 @@ export async function generateCodeCommand(ctx: MyContext) {
     return await ctx.reply(`Access denied`);
   }
 
-  const zoCount = 50_000;
-  const ztCount = 50_000;
-  const totalLen = zoCount + ztCount;
+  const voCount = 50_000;
+  const vtCount = 50_000;
+  const totalLen = voCount + vtCount;
   const codes = new Array<DocumentType<Code>>(totalLen);
 
   const oldCodes = await CodeModel.find({}, { value: 1 }).lean();
@@ -50,20 +50,20 @@ export async function generateCodeCommand(ctx: MyContext) {
     return code;
   };
 
-  for (let i = 0; i < zoCount; i++) {
+  for (let i = 0; i < voCount; i++) {
     codes[i] = new CodeModel({
       id: codesLen + i + 1,
-      value: `ZO${recursiveCodeGen(randomString(4, 4))}`,
+      value: `VT${recursiveCodeGen(randomString(4, 4))}`,
       isUsed: false,
       version: 2,
       deletedAt: null,
     });
   }
 
-  for (let i = 0; i < ztCount; i++) {
-    codes[zoCount + i] = new CodeModel({
-      id: codesLen + zoCount + i + 1,
-      value: `ZT${recursiveCodeGen(randomString(4, 4))}`,
+  for (let i = 0; i < vtCount; i++) {
+    codes[voCount + i] = new CodeModel({
+      id: codesLen + voCount + i + 1,
+      value: `VO${recursiveCodeGen(randomString(4, 4))}`,
       isUsed: false,
       version: 2,
       deletedAt: null,
