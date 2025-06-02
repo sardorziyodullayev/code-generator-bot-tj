@@ -25,7 +25,7 @@ export const messageIds: Record<'tj' | 'ru', MessageI> = {
       symbolic: 106,
     },
     codeReal: 52, // 52 face code
-    codeFake: 52,
+    codeFake: 8, // 8 real code
     codeUsed: 54,
     codeUsageLimit: 40,
     auth: { requestName: 56 },
@@ -41,7 +41,7 @@ export const messageIds: Record<'tj' | 'ru', MessageI> = {
     },
     auth: { requestName: 57 },
     codeReal: 53, // 53 face code
-    codeFake: 53,
+    codeFake: 9, // 9 real code
     codeUsed: 55,
     codeUsageLimit: 41,
   },
