@@ -40,8 +40,8 @@ export const messageIds: Record<'tj' | 'ru', MessageI> = {
       symbolic: 107,
     },
     auth: { requestName: 57 },
-    codeReal: 9, // 53 face code
-    codeFake: 53, // 9 real code
+    codeReal: 53, // 53 face code
+    codeFake: 9, // 9 real code
     codeUsed: 55,
     codeUsageLimit: 41,
   },
