@@ -1,27 +1,45 @@
-import { InputFile } from 'grammy';
 import { CodeModel } from '../../db/models/codes.model';
 import { MyContext } from '../types/types';
 import bot from '../core/bot';
-import { chooseLang } from '../helpers/inline.keyboard';
 import { UserModel } from '../../db/models/users.model';
 import { contactRequestKeyboard } from '../helpers/keyboard';
 import { mainMenu } from '../commands/start.handler';
 import { phoneCheck } from '../helpers/util';
-import { GiftModel } from '../../db/models/gifts.model';
 import { FORWARD_MESSAGES_CHANNEL_ID, messageIds } from '../config';
 import { CodeLogModel } from '../../db/models/code-logs.model';
 import { Types } from 'mongoose';
 import { SettingsModel } from '../../db/models/settings.model';
 import { BotLanguage } from '../core/middleware';
 
+// ⬇️ winners.json ni to'g'ridan-to'g'ri import qilamiz
+// Talab: tsconfig.json -> "resolveJsonModule": true
+import winners from '../../config/winners.json';
+
+// ---- Winners helper (JSON -> Map) ----
+type GiftTier = 'premium' | 'classic' | 'standard' | 'economy' | 'symbolic';
+
+const norm = (s: string) => (s || '').trim().toUpperCase();
+const hyphenize = (s: string) =>
+  s.includes('-') ? s : (s.length > 6 ? s.slice(0, 6) + '-' + s.slice(6) : s);
+
+const tierMap = new Map<string, GiftTier>();
+if ((winners as any)?.tiers) {
+  for (const [tier, arr] of Object.entries(
+    (winners as any).tiers as Record<string, string[]>
+  )) {
+    for (const code of arr || []) tierMap.set(norm(code), tier as GiftTier);
+  }
+}
+const getTier = (code: string): GiftTier | null => tierMap.get(norm(code)) ?? null;
+
+// -------------------------------------------------------
+
 async function registerUserName(ctx: MyContext) {
   const text = ctx.message!.text as string;
 
   await UserModel.findByIdAndUpdate(
     ctx.session.user.db_id,
-    {
-      $set: { firstName: text },
-    },
+    { $set: { firstName: text } },
     { lean: true },
   );
 
@@ -53,9 +71,7 @@ async function registerUserPhoneNumber(ctx: MyContext) {
 
   await UserModel.findByIdAndUpdate(
     ctx.session.user.db_id,
-    {
-      $set: { phoneNumber: phoneNumber },
-    },
+    { $set: { phoneNumber } },
     { lean: true },
   );
 
@@ -71,21 +87,31 @@ async function registerUserPhoneNumber(ctx: MyContext) {
 
 async function checkCode(ctx: MyContext) {
   const lang = ctx.i18n.languageCode as BotLanguage;
+
+  // UI cleanup
   if (ctx.session.is_editable_message && ctx.session.main_menu_message) {
-    await ctx.api.editMessageReplyMarkup(ctx.message!.chat.id, ctx.session.main_menu_message.message_id, {
-      reply_markup: { inline_keyboard: [] },
-    });
+    await ctx.api.editMessageReplyMarkup(
+      ctx.message!.chat.id,
+      ctx.session.main_menu_message.message_id,
+      { reply_markup: { inline_keyboard: [] } },
+    );
     ctx.session.main_menu_message = undefined;
   }
-
   ctx.session.is_editable_image = false;
   ctx.session.is_editable_message = false;
 
-  const usedCodesCount = await CodeModel.find({ usedById: ctx.session.user.db_id, deletedAt: null }).countDocuments();
+  // --- Per-user limit (tuzatilgan shart)
+  const usedCodesCount = await CodeModel.find({
+    usedById: ctx.session.user.db_id,
+    deletedAt: null,
+  }).countDocuments();
 
   const settings = await SettingsModel.findOne({ deletedAt: null }).lean();
-
-  if (settings && settings?.codeLimitPerUser?.status && settings?.codeLimitPerUser?.value && settings.codeLimitPerUser.value >= usedCodesCount) {
+  if (
+    settings?.codeLimitPerUser?.status &&
+    typeof settings.codeLimitPerUser.value === 'number' &&
+    usedCodesCount >= settings.codeLimitPerUser.value
+  ) {
     return await ctx.api.forwardMessage(
       ctx.from.id,
       FORWARD_MESSAGES_CHANNEL_ID,
@@ -93,104 +119,84 @@ async function checkCode(ctx: MyContext) {
     );
   }
 
-  const text = (ctx.message?.text ?? '').toUpperCase();
+  // --- Kodni normalize + hyphen
+  const raw = (ctx.message?.text ?? '').trim();
+  const upper = norm(raw);
+  const hyphened = hyphenize(upper);
+  const variants = Array.from(new Set([raw, upper, hyphened].filter(Boolean)));
 
+  // --- winners.json: kategoriya
+  const tier = getTier(hyphened); // null => yutuqsiz
+
+  // --- DB dan topib ko'ramiz (ayni paytda CodeLog uchun ham kerak bo'ladi)
   const code = await CodeModel.findOne(
     {
       $and: [
-        {
-          $or: [
-            { value: ctx.message?.text },
-            { value: text },
-            { value: text.substring(0, 6) + '-' + text.substring(6) },
-          ],
-        },
+        { $or: [{ value: variants[0] }, { value: variants[1] }, { value: variants[2] }] },
         { deletedAt: null },
       ],
     },
     { value: 1, isUsed: 1, usedById: 1, giftId: 1, productId: 1 },
   ).lean();
 
+  // Log
   await CodeLogModel.create({
     _id: new Types.ObjectId(),
     userId: ctx.session.user.db_id,
-    value: ctx.message.text,
+    value: ctx.message!.text,
     codeId: code ? code._id : null,
   });
 
-  if (!code) {
-    return await ctx.api.forwardMessage(ctx.from.id, FORWARD_MESSAGES_CHANNEL_ID, messageIds[lang].codeFake);
+  // --- Yutuqsiz: winners.jsonda yo'q
+  if (!tier) {
+    // Sening avvalgi UX'ing: DBda yo'q -> codeFake, DBda bor -> codeReal
+    const msgId = code ? messageIds[lang].codeReal : messageIds[lang].codeFake;
+    return await ctx.api.forwardMessage(ctx.from.id, FORWARD_MESSAGES_CHANNEL_ID, msgId);
   }
 
-  if (code.isUsed && code.usedById && code.usedById.toString() !== ctx.session.user.db_id.toString()) {
+  // --- Yutuqli, lekin boshqa user ishlatgan bo'lsa
+  if (code?.isUsed && code.usedById && code.usedById.toString() !== ctx.session.user.db_id.toString()) {
     return await ctx.api.forwardMessage(ctx.from.id, FORWARD_MESSAGES_CHANNEL_ID, messageIds[lang].codeUsed);
   }
 
-  if (!code.isUsed) {
+  // --- Yutuqli: isUsed=true qilib band qilib qo'yamiz
+  const nowIso = new Date().toISOString();
+  if (!code) {
+    // Yo'q bo'lsa minimal hujjat yaratamiz
+    await CodeModel.create({
+      value: hyphened,
+      version: 2,
+      giftId: null, // winners.json tier bo'yicha ishlaymiz, giftId shart emas
+      isUsed: true,
+      usedById: ctx.session.user.db_id,
+      usedAt: nowIso,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+  } else if (!code.isUsed) {
     await CodeModel.updateOne(
       { _id: code._id },
-      {
-        $set: {
-          isUsed: true,
-          usedAt: new Date().toISOString(),
-          usedById: ctx.session.user.db_id,
-        },
-      },
+      { $set: { isUsed: true, usedAt: nowIso, usedById: ctx.session.user.db_id } },
       { lean: true, new: true },
     );
   }
 
-  let caption = ctx.i18n.t('common.codeReal');
-  if (!code.giftId) {
-    return await ctx.api.forwardMessage(ctx.from.id, FORWARD_MESSAGES_CHANNEL_ID, messageIds[lang].codeReal);
-  }
-
-  const gift = await GiftModel.findById(code.giftId).lean();
-  caption = ctx.i18n.t('common.codeWithGift');
-
-  await GiftModel.findByIdAndUpdate(
-    code.giftId,
-    {
-      $set: {
-        $inc: {
-          usedCount: await CodeModel.countDocuments({ giftId: gift._id }).lean(),
-        },
-      },
-    },
-    { lean: true },
-  );
+  // --- Kategoriya bo'yicha tayyor xabarni forward qilamiz
   return await ctx.api.forwardMessage(
     ctx.from.id,
     FORWARD_MESSAGES_CHANNEL_ID,
-    messageIds[lang].codeWithGift[gift.type],
+    messageIds[lang].codeWithGift[tier],
   );
-  return await ctx.api.forwardMessage(ctx.from.id, -1001886860465, 8);
-
-  const filePath = `${process.cwd()}/files/${gift!.image}`;
-  ctx.session.is_editable_image = true;
-  ctx.session.is_editable_message = false;
-
-  return await ctx.replyWithPhoto(new InputFile(filePath), {
-    caption: caption,
-    parse_mode: 'HTML',
-  });
 }
 
 const onMessageHandler = async (ctx: MyContext) => {
-  // console.log(ctx.message);
-
-  // await ctx.api.forwardMessage(ctx.from.id, -1001886860465, 3);
-  // return;
   switch (ctx.session.user_state) {
     case 'REGISTER_NAME':
       return await registerUserName(ctx);
-      break;
     case 'REGISTER_PHONE_NUMBER':
       return await registerUserPhoneNumber(ctx);
-      break;
     default:
       return await checkCode(ctx);
-      break;
   }
 };
 
