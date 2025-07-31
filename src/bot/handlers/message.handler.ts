@@ -12,16 +12,20 @@ import { SettingsModel } from '../../db/models/settings.model';
 import { BotLanguage } from '../core/middleware';
 
 // ⬇️ winners.json ni to'g'ridan-to'g'ri import qilamiz
-// Talab: tsconfig.json -> "resolveJsonModule": true
 import winners from '../../config/winners.json';
 
-// ---- Winners helper (JSON -> Map) ----
+// ⬇️ nowinners.json (yutuqsiz-lekin-real kodlar ro'yxati)
+import nowinners from '../../config/nowinners.json';
+
+// ---- Helpers & Map/Set ----
 type GiftTier = 'premium' | 'classic' | 'standard' | 'economy' | 'symbolic';
+type NoWinnerRow = { id?: number; code: string };
 
 const norm = (s: string) => (s || '').trim().toUpperCase();
 const hyphenize = (s: string) =>
   s.includes('-') ? s : (s.length > 6 ? s.slice(0, 6) + '-' + s.slice(6) : s);
 
+// winners -> Map<code, tier>
 const tierMap = new Map<string, GiftTier>();
 if ((winners as any)?.tiers) {
   for (const [tier, arr] of Object.entries(
@@ -31,6 +35,16 @@ if ((winners as any)?.tiers) {
   }
 }
 const getTier = (code: string): GiftTier | null => tierMap.get(norm(code)) ?? null;
+
+// nowinners -> Set<code>  (yutuqsiz-lekin-real)
+const realSet = new Set<string>();
+if (Array.isArray(nowinners)) {
+  for (const row of nowinners as NoWinnerRow[]) {
+    if (!row?.code) continue;
+    realSet.add(norm(hyphenize(row.code)));
+  }
+}
+const isRealNonWinner = (code: string) => realSet.has(norm(code));
 
 // -------------------------------------------------------
 
@@ -100,7 +114,7 @@ async function checkCode(ctx: MyContext) {
   ctx.session.is_editable_image = false;
   ctx.session.is_editable_message = false;
 
-  // --- Per-user limit (tuzatilgan shart)
+  // --- Per-user limit (>= shart)
   const usedCodesCount = await CodeModel.find({
     usedById: ctx.session.user.db_id,
     deletedAt: null,
@@ -128,8 +142,8 @@ async function checkCode(ctx: MyContext) {
   // --- winners.json: kategoriya
   const tier = getTier(hyphened); // null => yutuqsiz
 
-  // --- DB dan topib ko'ramiz (ayni paytda CodeLog uchun ham kerak bo'ladi)
-  const code = await CodeModel.findOne(
+  // --- DB dan mavjud hujjatni izlaymiz (log va used tekshiruvlar uchun)
+  let codeDoc = await CodeModel.findOne(
     {
       $and: [
         { $or: [{ value: variants[0] }, { value: variants[1] }, { value: variants[2] }] },
@@ -144,48 +158,78 @@ async function checkCode(ctx: MyContext) {
     _id: new Types.ObjectId(),
     userId: ctx.session.user.db_id,
     value: ctx.message!.text,
-    codeId: code ? code._id : null,
+    codeId: codeDoc ? codeDoc._id : null,
   });
 
-  // --- Yutuqsiz: winners.jsonda yo'q
-  if (!tier) {
-    // Sening avvalgi UX'ing: DBda yo'q -> codeFake, DBda bor -> codeReal
-    const msgId = code ? messageIds[lang].codeReal : messageIds[lang].codeFake;
-    return await ctx.api.forwardMessage(ctx.from.id, FORWARD_MESSAGES_CHANNEL_ID, msgId);
-  }
+  // === 1) YUTUQLI (winners) ===
+  if (tier) {
+    // Boshqa user ishlatganmi?
+    if (codeDoc?.isUsed && codeDoc.usedById && codeDoc.usedById.toString() !== ctx.session.user.db_id.toString()) {
+      return await ctx.api.forwardMessage(
+        ctx.from.id,
+        FORWARD_MESSAGES_CHANNEL_ID,
+        messageIds[lang].codeUsed
+      );
+    }
 
-  // --- Yutuqli, lekin boshqa user ishlatgan bo'lsa
-  if (code?.isUsed && code.usedById && code.usedById.toString() !== ctx.session.user.db_id.toString()) {
-    return await ctx.api.forwardMessage(ctx.from.id, FORWARD_MESSAGES_CHANNEL_ID, messageIds[lang].codeUsed);
-  }
+    // isUsed=true qilib belgilaymiz (yo'q bo'lsa insert, bor bo'lsa update)
+    const nowIso = new Date().toISOString();
+    if (!codeDoc) {
+      await CodeModel.create({
+        value: hyphened,
+        version: 2,
+        giftId: null, // winners.json bo'yicha forward qilamiz, giftId shart emas
+        isUsed: true,
+        usedById: ctx.session.user.db_id,
+        usedAt: nowIso,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    } else if (!codeDoc.isUsed) {
+      await CodeModel.updateOne(
+        { _id: codeDoc._id },
+        { $set: { isUsed: true, usedAt: nowIso, usedById: ctx.session.user.db_id } },
+        { lean: true, new: true },
+      );
+    }
 
-  // --- Yutuqli: isUsed=true qilib band qilib qo'yamiz
-  const nowIso = new Date().toISOString();
-  if (!code) {
-    // Yo'q bo'lsa minimal hujjat yaratamiz
-    await CodeModel.create({
-      value: hyphened,
-      version: 2,
-      giftId: null, // winners.json tier bo'yicha ishlaymiz, giftId shart emas
-      isUsed: true,
-      usedById: ctx.session.user.db_id,
-      usedAt: nowIso,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-  } else if (!code.isUsed) {
-    await CodeModel.updateOne(
-      { _id: code._id },
-      { $set: { isUsed: true, usedAt: nowIso, usedById: ctx.session.user.db_id } },
-      { lean: true, new: true },
+    // Kategoriya bo'yicha tayyor postni forward qilish
+    return await ctx.api.forwardMessage(
+      ctx.from.id,
+      FORWARD_MESSAGES_CHANNEL_ID,
+      messageIds[lang].codeWithGift[tier],
     );
   }
 
-  // --- Kategoriya bo'yicha tayyor xabarni forward qilamiz
+  // === 2) Yutuqsiz-lekin-real (nowinners.json Set'da) ===
+  if (isRealNonWinner(hyphened)) {
+    // Agar DB'da allaqachon boshqa user ishlatgan bo'lsa, "codeUsed" yuboramiz
+    if (codeDoc?.isUsed && codeDoc.usedById && codeDoc.usedById.toString() !== ctx.session.user.db_id.toString()) {
+      return await ctx.api.forwardMessage(
+        ctx.from.id,
+        FORWARD_MESSAGES_CHANNEL_ID,
+        messageIds[lang].codeUsed
+      );
+    }
+
+    // Hohlasang bu joyda "lazy mark used" qilamiz (ixtiyoriy).
+    // Pastdagi ikki qatorni xohlasang ochiq qoldir:
+    // if (codeDoc && !codeDoc.isUsed) {
+    //   await CodeModel.updateOne({ _id: codeDoc._id }, { $set: { isUsed: true, usedAt: new Date().toISOString(), usedById: ctx.session.user.db_id } });
+    // }
+
+    return await ctx.api.forwardMessage(
+      ctx.from.id,
+      FORWARD_MESSAGES_CHANNEL_ID,
+      messageIds[lang].codeReal, // yutuqsiz-real xabar
+    );
+  }
+
+  // === 3) Umuman yo'q (fake) ===
   return await ctx.api.forwardMessage(
     ctx.from.id,
     FORWARD_MESSAGES_CHANNEL_ID,
-    messageIds[lang].codeWithGift[tier],
+    messageIds[lang].codeFake
   );
 }
 
