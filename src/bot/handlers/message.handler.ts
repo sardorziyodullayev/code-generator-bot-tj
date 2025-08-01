@@ -39,9 +39,9 @@ const getTier = (code: string): GiftTier | null => tierMap.get(norm(code)) ?? nu
 // nowinners -> Set<code>  (yutuqsiz-lekin-real)
 const realSet = new Set<string>();
 if (Array.isArray(nowinners)) {
-  for (const row of nowinners as NoWinnerRow[]) {
-    if (!row?.code) continue;
-    realSet.add(norm(hyphenize(row.code)));
+  for (const code of nowinners as string[]) {
+    if (!code) continue;
+    realSet.add(norm(hyphenize(code)));
   }
 }
 const isRealNonWinner = (code: string) => realSet.has(norm(code));
